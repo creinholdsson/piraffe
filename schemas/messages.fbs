@@ -1,0 +1,38 @@
+table Connection {
+    name:string;
+}
+
+table Publish {
+    topic:string;
+    data:[ubyte];
+}
+
+table Subscribe {
+    topic:string;
+}
+
+table Request {
+    topic:string;
+    reply_topic:string;
+    data:[ubyte];
+}
+
+table Message {
+    topic:string;
+    reply_requested:bool;
+    reply_topic:string;
+    data:[ubyte];
+}
+
+table Welcome {
+    server_name:string;
+}
+
+union All { Connection, Publish, Subscribe, Request, Message, Welcome }
+
+table Proto {
+    timestamp:int64;
+    message:All;
+}
+
+root_type Proto;
