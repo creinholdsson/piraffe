@@ -29,9 +29,10 @@ fn main() {
         log::debug!("Starting coordinator");
         coordinater.run();
     });
-
+    loop {
     for stream in listener.accept() {
         log::debug!("Client connected from {}", stream.1);
+        stream.0.set_nonblocking(true).expect("Failed to set nonblocking");
         let to_coordinator = from_clients.0.clone();
         let from_coordinator = to_clients.1.clone();
         let mut client_listener = ClientListener::new(from_coordinator, to_coordinator, stream.0);
@@ -40,6 +41,6 @@ fn main() {
             client_listener.run();          
         });
     }
+    }
 
-    std::thread::sleep(std::time::Duration::from_secs(2));
 }

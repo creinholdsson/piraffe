@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{Read, Write, ErrorKind};
 use std::net::TcpStream;
 use crossbeam::channel::{Receiver, Sender};
 use piraffe_common::fb_generated::{All, root_as_proto};
@@ -26,11 +26,12 @@ impl ClientListener {
 
     }
 
-    fn check_client_socket(&mut self) {
+    fn check_client_socket(&mut self) -> bool {
 
         match self.stream.read(&mut self.buf) {
             Ok(bytes) if bytes > 0 => {
                 log::debug!("Received from server");
+                
                 match root_as_proto(&self.buf) {
                     Ok(msg) => {
                         println!("Got proto {} {:?}", bytes, msg);
@@ -44,14 +45,22 @@ impl ClientListener {
                                 let sub_msg = msg.message_as_subscribe();
                                 let topic = sub_msg.unwrap().topic().unwrap();
                                 self.subscriptions.push(topic.to_string());
-                            }
+                            },
+                            All::Publish => {
+                                let pub_msg = msg.message_as_publish();
+                                let name = pub_msg.unwrap().topic().unwrap();
+                                log::info!("Got publish on topic {}", name);
+                            },
                             _ => {}
                         }
                     },
                     Err(err) => {eprintln!("Error: {}", err)}
                 }
+                true
             }
-            _ => {}
+            Err(ref e) if e.kind() == ErrorKind::Other  => {log::error!("{}", e); true},
+            Err(_) => false,
+            Ok(_) => true
 
             
         }
@@ -59,6 +68,7 @@ impl ClientListener {
 
     fn check_coordinator_channel(&mut self) {
         if let Ok(msg) = self.from_coordinator.try_recv() {
+            log::info!("Got message from coordinator");
             match msg.topic {
                 Some(topic) => {
                     if self.subscriptions.contains(&topic)  {
@@ -75,10 +85,13 @@ impl ClientListener {
     pub fn run(&mut self) {
         
 
-        self.stream.set_nonblocking(true).expect("failed to set nonblocking");
+        //self.stream.set_nonblocking(true).expect("failed to set nonblocking");
 
         loop {
-            self.check_client_socket();
+            if !self.check_client_socket() {
+                log::info!("Socket failure or disconnect, stopping listener ");
+                break;
+            }
             self.check_coordinator_channel();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }

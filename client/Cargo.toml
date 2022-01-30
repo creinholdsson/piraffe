@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 piraffe_common = { path = "../common" }
 flatbuffers = "2.0.0"
+crossbeam = "0.8.1"

@@ -22,7 +22,7 @@ impl Coordinator {
                         let mut builder = FlatBufferBuilder::new();
                         let mut buffer: Vec<u8> = Vec::new();
                         make_welcome(&mut builder, &mut buffer, "cool server");
-                        self.to_clients.send(MessageFromCoordinator{topic: None, message_data: buffer });
+                        self.to_clients.send(MessageFromCoordinator{topic: None, message_data: buffer }).expect("failed to send");
                     }
                     _ => {
                         log::warn!("Unsupported message :(")
