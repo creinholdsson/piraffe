@@ -1,15 +1,16 @@
 use std::io::{Read, Write, ErrorKind};
 use std::net::TcpStream;
 use crossbeam::channel::{Receiver, Sender};
-use piraffe_common::fb_generated::{All, root_as_proto};
-use piraffe_common::{MessageFromCoordinator, MessageToCoordinator, ConnectionMessage};
+use piraffe_common::fb_generated::{All};
+use piraffe_common::{MessageFromCoordinator, MessageToCoordinator, ConnectionMessage, get_proto_message};
 
 pub struct ClientListener {
     to_coordinator: Sender<MessageToCoordinator>,
     from_coordinator: Receiver<MessageFromCoordinator>,
     stream: TcpStream,
     buf: [u8; 7000],
-    subscriptions: Vec<String>
+    subscriptions: Vec<String>,
+    buf_offset: usize
 }
 
 impl ClientListener {
@@ -22,47 +23,56 @@ impl ClientListener {
                    stream,
                    buf: [0u8; 7000],
                    subscriptions: Vec::new(),
+                   buf_offset: 0
                }
-
     }
 
     fn check_client_socket(&mut self) -> bool {
-
-        match self.stream.read(&mut self.buf) {
+         
+        match self.stream.read(&mut self.buf[self.buf_offset..]) {
+            
             Ok(bytes) if bytes > 0 => {
-                log::debug!("Received from server");
-                
-                match root_as_proto(&self.buf) {
-                    Ok(msg) => {
-                        println!("Got proto {} {:?}", bytes, msg);
-                        match msg.message_type() {
-                            All::Connection => {
-                                let conn_msg = msg.message_as_connection();
-                                let name = conn_msg.unwrap().name().unwrap();
-                                self.to_coordinator.send(MessageToCoordinator::Connect(ConnectionMessage { name: String::from(name) }));
-                            },
-                            All::Subscribe => {
-                                let sub_msg = msg.message_as_subscribe();
-                                let topic = sub_msg.unwrap().topic().unwrap();
-                                self.subscriptions.push(topic.to_string());
-                            },
-                            All::Publish => {
-                                let pub_msg = msg.message_as_publish();
-                                let name = pub_msg.unwrap().topic().unwrap();
-                                log::info!("Got publish on topic {}", name);
-                            },
-                            _ => {}
-                        }
-                    },
-                    Err(err) => {eprintln!("Error: {}", err)}
+                let mut start = 0 as usize;
+                while let Ok((size, proto)) = get_proto_message(&self.buf[start..bytes]) {
+                    match proto.message_type() {
+                        All::Connection => {
+                            let conn_msg = proto.message_as_connection();
+                            let name = conn_msg.unwrap().name().unwrap();
+                            self.to_coordinator.send(MessageToCoordinator::Connect(ConnectionMessage { name: String::from(name) })).unwrap();
+                        },
+                        All::Subscribe => {
+                            let sub_msg = proto.message_as_subscribe();
+                            let topic = sub_msg.unwrap().topic().unwrap();
+                            self.subscriptions.push(topic.to_string());
+                            log::info!("Client is subscribing to {}", topic);
+                        },
+                        All::Publish => {
+                            let pub_msg = proto.message_as_publish();
+                            let name = pub_msg.unwrap().topic().unwrap();
+                            log::info!("Got publish on topic {}", name);
+                        },
+                        _ => {}
+                    }
+                    
+                    start += size;
                 }
+                self.buf_offset = start;
+
+                
                 true
             }
-            Err(ref e) if e.kind() == ErrorKind::Other  => {log::error!("{}", e); true},
-            Err(_) => false,
-            Ok(_) => true
-
-            
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock  => {
+                self.buf_offset = 0;
+                true
+            },
+            Err(err) => {
+                println!("{:?}", err.kind());
+                false
+            },
+            Ok(_) => {
+                self.buf_offset = 0;
+                true
+            }
         }
     }
 

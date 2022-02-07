@@ -1,3 +1,5 @@
+use fb_generated::size_prefixed_root_as_proto;
+use byteorder::ByteOrder;
 
 pub mod fb_generated;
 use flatbuffers::*;
@@ -56,7 +58,7 @@ pub fn make_connect(builder: &mut FlatBufferBuilder, dest: &mut Vec<u8>, client_
 
     let conn_buf = fb_generated::Proto::create(builder, &args);
 
-    builder.finish(conn_buf, None);
+    builder.finish_size_prefixed(conn_buf, None);
 
     let extended_data = builder.finished_data();
     dest.extend_from_slice(extended_data);
@@ -80,7 +82,7 @@ pub fn make_welcome(builder: &mut FlatBufferBuilder, dest: &mut Vec<u8>, server_
     };
 
     let welcome_buf = fb_generated::Proto::create(builder, &args);
-    builder.finish_minimal(welcome_buf);
+    builder.finish_size_prefixed(welcome_buf, None);
     dest.extend_from_slice(builder.finished_data());
 }
 
@@ -96,7 +98,7 @@ pub fn make_publish(builder: &mut FlatBufferBuilder, dest: &mut Vec<u8>, topic: 
         data: Some(data)
     };
 
-    let publish = fb_generated::Publish::create(builder, &&publish_message);
+    let publish = fb_generated::Publish::create(builder, &publish_message);
 
     let proto_args = fb_generated::ProtoArgs {
         timestamp: 0,
@@ -105,7 +107,46 @@ pub fn make_publish(builder: &mut FlatBufferBuilder, dest: &mut Vec<u8>, topic: 
     };
 
     let publish_buf = fb_generated::Proto::create(builder, &proto_args);
-    builder.finish_minimal(publish_buf);
+    builder.finish_size_prefixed(publish_buf, None);
 
     dest.extend_from_slice(builder.finished_data());
+}
+
+pub fn make_subscribe(builder: &mut FlatBufferBuilder, dest: &mut Vec<u8>, topic: &str) {
+    dest.clear();
+    builder.reset();
+
+    let topic = builder.create_string(topic);
+
+    let subscribe_message = fb_generated::SubscribeArgs {
+        topic: Some(topic),
+    };
+
+    let subscribe = fb_generated::Subscribe::create(builder, &subscribe_message);
+
+    let proto_args = fb_generated::ProtoArgs {
+        timestamp: 0,
+        message_type: fb_generated::All::Subscribe,
+        message: Some(subscribe.as_union_value())
+    };
+    let publish_buf = fb_generated::Proto::create(builder, &proto_args);
+    builder.finish_size_prefixed(publish_buf, None);
+
+    dest.extend_from_slice(builder.finished_data());
+}
+
+pub fn get_proto_message<'a>(buf: &'a [u8]) -> Result<(usize, fb_generated::Proto<'a>),()> {
+    if buf.len() == 0 {
+        return Err(())
+    }
+    let size = byteorder::LittleEndian::read_u32(buf);
+    println!("size: {} buflen {}", size, buf.len());
+    if size > buf.len() as u32 || size == 0 {
+        return Err(())
+    }
+    
+    match size_prefixed_root_as_proto(buf) {
+        Ok(buf) => Ok((size as usize + 4, buf)),
+        Err(_) => Err(())
+    }
 }
